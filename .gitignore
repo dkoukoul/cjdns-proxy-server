@@ -1,0 +1,4 @@
+/target
+* ignores all files.
+!/**/ unignores all directories.
+!*.* unignores all files with an extension.
