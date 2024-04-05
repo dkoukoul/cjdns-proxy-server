@@ -138,7 +138,7 @@ func main() {
 
 	// Set up the HTTP server
 	server := &http.Server{
-		Addr: "[::]:" + proxyPort,
+		Addr: "["+fromHost+"]:" + proxyPort,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Received request: %s %s\n", r.Method, r.URL)
 			// Modify request headers
