@@ -39,8 +39,8 @@ func modifyResponseHeaders(response *http.Response) http.Header {
 
 	// Modify the Location and Refresh headers
 	location := modifiedHeaders.Get("Location")
-	if location != "" && strings.HasPrefix(location, "https://"+toHost+"/") {
-		modifiedLocation := strings.ReplaceAll(location, "https://"+toHost, "http://["+fromHost+"]/")
+	if location != "" && strings.HasPrefix(location, "https://"+toHost) {
+		modifiedLocation := strings.ReplaceAll(location, "https://"+toHost, "http://["+fromHost+"]")
 		modifiedHeaders.Set("Location", modifiedLocation)
 	}
 
@@ -138,7 +138,7 @@ func main() {
 
 	// Set up the HTTP server
 	server := &http.Server{
-		Addr: "[::1]:" + proxyPort,
+		Addr: "[::]:" + proxyPort,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Received request: %s %s\n", r.Method, r.URL)
 			// Modify request headers
