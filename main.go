@@ -25,22 +25,25 @@ func modifyRequestHeaders(request *http.Request) http.Header {
 	modifiedHeaders := request.Header.Clone()
 	modifiedHeaders.Set("X-Real-IP", request.RemoteAddr)
 	modifiedHeaders.Set("X-Forwarded-For", request.RemoteAddr)
-	modifiedHeaders.Set("Referer", request.Referer())
-	modifiedHeaders.Set("I-Set-The-Referer-To", request.Referer())
+	referer := modifiedHeaders.Get("Referer")
+	if referer != "" && strings.HasPrefix(referer, "http://["+fromHost+"]") {
+		modifiedLocation := strings.ReplaceAll(referer, "http://["+fromHost+"]", "https://"+toHost)
+		modifiedHeaders.Set("Referer", modifiedLocation)
+	}
+
 	return modifiedHeaders
 }
 
 func modifyResponseHeaders(response *http.Response) http.Header {
 	modifiedHeaders := response.Header.Clone()
 
-	// Delete the headers
 	modifiedHeaders.Del("Content-Security-Policy")
 	modifiedHeaders.Del("Strict-Transport-Security")
 
-	// Modify the Location and Refresh headers
 	location := modifiedHeaders.Get("Location")
-	if location != "" && strings.HasPrefix(location, "https://"+toHost) {
+	if location != "" && (strings.HasPrefix(location, "https://"+toHost) || strings.HasPrefix(location, "https://yunohost.local")) {
 		modifiedLocation := strings.ReplaceAll(location, "https://"+toHost, "http://["+fromHost+"]")
+		modifiedLocation = strings.ReplaceAll(modifiedLocation, "https://yunohost.local", "http://["+fromHost+"]")
 		modifiedHeaders.Set("Location", modifiedLocation)
 	}
 
@@ -50,7 +53,6 @@ func modifyResponseHeaders(response *http.Response) http.Header {
 		modifiedHeaders.Set("Refresh", modifiedRefresh)
 	}
 
-	// Modify the Set-Cookie headers
 	for _, cookie := range response.Cookies() {
 		cookie.Domain = fromHost
 		cookie.Secure = false
@@ -61,7 +63,6 @@ func modifyResponseHeaders(response *http.Response) http.Header {
 }
 
 func modifyBody(body []byte) string {
-	// Perform the replacement
 	modifiedBody := strings.ReplaceAll(string(body), "https://"+toHost, "http://["+fromHost+"]")
 	return modifiedBody
 }
@@ -92,9 +93,14 @@ func ListenAndServe(server *http.Server) error {
 }
 
 func main() {
-
 	toHost = os.Getenv("PROXY_TO_HOST")
 	fromHost = os.Getenv("PROXY_FROM_HOST")
+	ip := net.ParseIP(fromHost)
+	if ip == nil {
+		log.Fatalf("Invalid IP address: %s", fromHost)
+	}
+
+	fromHost = ip.String()
 	proxyPort = os.Getenv("PROXY_PORT")
 	if toHost == "" || fromHost == "" || proxyPort == "" {
 		fmt.Println("One or more environment variables are not set. Please set PROXY_TO_HOST, PROXY_FROM_HOST, and PROXY_PORT.")
@@ -115,47 +121,35 @@ func main() {
 	// Modify the request before sending it to the backend
 	proxy.ModifyResponse = func(response *http.Response) error {
 		log.Printf("Sending response: %s\n", response.Status)
-		// Read the response body
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			log.Println("Error reading response body:", err)
 			return err
 		}
-
-		// Close the original body
 		response.Body.Close()
-
-		// Perform the replacement
 		modifiedBody := modifyBody(body)
-
-		// Write the modified body back
 		response.Body = io.NopCloser(bytes.NewBufferString(modifiedBody))
-
 		response.Header = modifyResponseHeaders(response)
-
 		return nil
 	}
 
 	// Set up the HTTP server
 	server := &http.Server{
-		Addr: "["+fromHost+"]:" + proxyPort,
+		Addr: "[" + fromHost + "]:" + proxyPort,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Received request: %s %s\n", r.Method, r.URL)
-			// Modify request headers
 			r.Host = toHost
 			r.Header = modifyRequestHeaders(r)
-
-			// Rewrite request URL
 			r.URL.Host = fromHost
 			r.URL.Scheme = "http"
 
-			// Perform reverse proxying
 			proxy.ServeHTTP(w, r)
 		}),
 	}
 
 	// Start the server
-	log.Println("Starting server on port", proxyPort)
+	log.Println("Starting cjdns proxy server on port", proxyPort)
+	log.Println("Proxying from", fromHost, "to", toHost)
 	err := ListenAndServe(server)
 	if err != nil {
 		log.Println("Error starting server:", err)
