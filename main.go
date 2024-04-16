@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"encoding/json"
 	"log"
 	"net"
 	"net/http"
@@ -20,6 +21,10 @@ var (
 	fromHost  string
 	proxyPort string
 )
+
+type CjdrouteConfig struct {
+	IPv6 string `json:"ipv6"`
+}
 
 func modifyRequestHeaders(request *http.Request) http.Header {
 	modifiedHeaders := request.Header.Clone()
@@ -93,15 +98,29 @@ func ListenAndServe(server *http.Server) error {
 }
 
 func main() {
-	toHost = os.Getenv("PROXY_TO_HOST")
-	fromHost = os.Getenv("PROXY_FROM_HOST")
+	data, err := os.ReadFile("/etc/hostname")
+	if err != nil {
+		log.Fatal("Error reading hostname file:", err)
+	}
+	toHost = strings.TrimSpace(string(data))
+
+	data, err = os.ReadFile("/var/www/cjdns/cjdroute.conf")
+	if err != nil {
+		log.Fatal("Error reading cjdroute.conf file:", err)
+	}
+	var config CjdrouteConfig
+	err = json.Unmarshal(data, &config)
+	if err != nil {
+		log.Fatal("Error parsing cjdroute.conf file:", err)
+	}
+	fromHost = config.IPv6
 	ip := net.ParseIP(fromHost)
 	if ip == nil {
 		log.Fatalf("Invalid IP address: %s", fromHost)
 	}
 
 	fromHost = ip.String()
-	proxyPort = os.Getenv("PROXY_PORT")
+	proxyPort = "80"
 	if toHost == "" || fromHost == "" || proxyPort == "" {
 		fmt.Println("One or more environment variables are not set. Please set PROXY_TO_HOST, PROXY_FROM_HOST, and PROXY_PORT.")
 		os.Exit(1)
@@ -150,7 +169,7 @@ func main() {
 	// Start the server
 	log.Println("Starting cjdns proxy server on port", proxyPort)
 	log.Println("Proxying from", fromHost, "to", toHost)
-	err := ListenAndServe(server)
+	err = ListenAndServe(server)
 	if err != nil {
 		log.Println("Error starting server:", err)
 	}
