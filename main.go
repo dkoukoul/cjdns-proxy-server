@@ -1,17 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
-	"encoding/json"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -21,10 +24,6 @@ var (
 	fromHost  string
 	proxyPort string
 )
-
-type CjdrouteConfig struct {
-	IPv6 string `json:"ipv6"`
-}
 
 func modifyRequestHeaders(request *http.Request) http.Header {
 	modifiedHeaders := request.Header.Clone()
@@ -46,9 +45,9 @@ func modifyResponseHeaders(response *http.Response) http.Header {
 	modifiedHeaders.Del("Strict-Transport-Security")
 
 	location := modifiedHeaders.Get("Location")
-	if location != "" && (strings.HasPrefix(location, "https://"+toHost) || strings.HasPrefix(location, "https://yunohost.local")) {
+	if location != "" && strings.HasPrefix(location, "https://"+toHost) {//|| strings.HasPrefix(location, "https://yunohost.local")) {
 		modifiedLocation := strings.ReplaceAll(location, "https://"+toHost, "http://["+fromHost+"]")
-		modifiedLocation = strings.ReplaceAll(modifiedLocation, "https://yunohost.local", "http://["+fromHost+"]")
+		//modifiedLocation = strings.ReplaceAll(modifiedLocation, "https://yunohost.local", "http://["+fromHost+"]")
 		modifiedHeaders.Set("Location", modifiedLocation)
 	}
 
@@ -97,6 +96,92 @@ func ListenAndServe(server *http.Server) error {
 	return server.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
 }
 
+func commentOut(filename string) error {
+	// Open the file in read-only mode.
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Read the file line by line.
+	lines := []string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// If the line contains "listen [::]:80", comment it out.
+		if strings.Contains(line, "listen [::]:80") && !strings.HasPrefix(line, "#") {
+			line = "#" + line + " # by cjdns-proxy-server"
+		}
+		lines = append(lines, line)
+	}
+
+	// Check for errors from scanner.
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	// Open the file in write mode.
+	file, err = os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Write the modified lines back to the file.
+	writer := bufio.NewWriter(file)
+	for _, line := range lines {
+		_, err := writer.WriteString(line + "\n")
+		if err != nil {
+			return err
+		}
+	}
+
+	return writer.Flush()
+}
+
+func modifyNginxConfig() error {
+	log.Println("Modifying nginx configuration")
+	files, err := ioutil.ReadDir("/etc/nginx/conf.d/")
+    if err != nil {
+        return err
+    }
+
+    var confFiles []string
+    for _, file := range files {
+        if strings.HasSuffix(file.Name(), ".conf") {
+            confFiles = append(confFiles, "/etc/nginx/conf.d/" + file.Name())
+        }
+    }
+	for _, file := range confFiles {
+		err := commentOut(file)
+		if err != nil {
+			return err
+		}
+	}
+	// Restart nginx
+	log.Println("Restarting nginx...")
+	cmd := exec.Command("systemctl", "restart", "nginx")
+	err = cmd.Run()
+	if err != nil {
+		log.Fatalf("cmd.Run() failed with %s\n", err)
+	}
+	// Wait until nginx has restarted
+	for {
+		cmd = exec.Command("systemctl", "is-active", "nginx")
+		output, err := cmd.Output()
+		if err != nil {
+			log.Fatalf("cmd.Output() failed with %s\n", err)
+		}
+		if strings.TrimSpace(string(output)) == "active" {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	log.Println("Nginx restarted")
+	return nil
+}
+
 func main() {
 	data, err := os.ReadFile("/etc/hostname")
 	if err != nil {
@@ -106,14 +191,20 @@ func main() {
 
 	data, err = os.ReadFile("/var/www/cjdns/cjdroute.conf")
 	if err != nil {
-		log.Fatal("Error reading cjdroute.conf file:", err)
+		data, err = os.ReadFile("/etc/cjdroute.conf")
+		if err != nil {
+			log.Fatal("Error reading cjdroute.conf file:", err)
+		}
 	}
-	var config CjdrouteConfig
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		log.Fatal("Error parsing cjdroute.conf file:", err)
+
+	re := regexp.MustCompile(`"ipv6":\s*"([^"]*)"`)
+	match := re.FindStringSubmatch(string(data))
+	if len(match) < 2 {
+		log.Fatal("Error parsing cjdroute.conf file: IPv6 address not found")
 	}
-	fromHost = config.IPv6
+
+	fromHost := match[1]
+
 	ip := net.ParseIP(fromHost)
 	if ip == nil {
 		log.Fatalf("Invalid IP address: %s", fromHost)
@@ -122,9 +213,12 @@ func main() {
 	fromHost = ip.String()
 	proxyPort = "80"
 	if toHost == "" || fromHost == "" || proxyPort == "" {
-		fmt.Println("One or more environment variables are not set. Please set PROXY_TO_HOST, PROXY_FROM_HOST, and PROXY_PORT.")
+		fmt.Println("One or more environment variables are not set. Please set cjdroute.conf and hostname file.")
 		os.Exit(1)
 	}
+
+	modifyNginxConfig()
+
 	// Create a reverse proxy
 	target, _ := url.Parse("https://127.0.0.1")
 	proxy := httputil.NewSingleHostReverseProxy(target)
