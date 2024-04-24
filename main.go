@@ -45,15 +45,17 @@ func modifyResponseHeaders(response *http.Response) http.Header {
 	modifiedHeaders.Del("Strict-Transport-Security")
 
 	location := modifiedHeaders.Get("Location")
-	if location != "" && strings.HasPrefix(location, "https://"+toHost) {//|| strings.HasPrefix(location, "https://yunohost.local")) {
+	if location != "" && (strings.HasPrefix(location, "https://"+toHost) || strings.HasPrefix(location, "https://yunohost.local")) {
 		modifiedLocation := strings.ReplaceAll(location, "https://"+toHost, "http://["+fromHost+"]")
-		//modifiedLocation = strings.ReplaceAll(modifiedLocation, "https://yunohost.local", "http://["+fromHost+"]")
+		modifiedLocation = strings.ReplaceAll(modifiedLocation, "https://yunohost.local", "http://["+fromHost+"]")
+		//log.Printf("From: %s To: %s\n", location, modifiedLocation)
 		modifiedHeaders.Set("Location", modifiedLocation)
 	}
 
 	refresh := modifiedHeaders.Get("Refresh")
 	if refresh != "" {
 		modifiedRefresh := strings.ReplaceAll(refresh, "https://"+toHost, "http://["+fromHost+"]")
+		//log.Printf("From: %s To: %s\n", refresh, modifiedRefresh)
 		modifiedHeaders.Set("Refresh", modifiedRefresh)
 	}
 
@@ -203,7 +205,7 @@ func main() {
 		log.Fatal("Error parsing cjdroute.conf file: IPv6 address not found")
 	}
 
-	fromHost := match[1]
+	fromHost = match[1]
 
 	ip := net.ParseIP(fromHost)
 	if ip == nil {
