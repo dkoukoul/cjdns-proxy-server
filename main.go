@@ -145,16 +145,16 @@ func commentOut(filename string) error {
 func modifyNginxConfig() error {
 	log.Println("Modifying nginx configuration")
 	files, err := ioutil.ReadDir("/etc/nginx/conf.d/")
-    if err != nil {
-        return err
-    }
+	if err != nil {
+		return err
+	}
 
-    var confFiles []string
-    for _, file := range files {
-        if strings.HasSuffix(file.Name(), ".conf") {
-            confFiles = append(confFiles, "/etc/nginx/conf.d/" + file.Name())
-        }
-    }
+	var confFiles []string
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".conf") {
+			confFiles = append(confFiles, "/etc/nginx/conf.d/"+file.Name())
+		}
+	}
 	for _, file := range confFiles {
 		err := commentOut(file)
 		if err != nil {
@@ -199,7 +199,7 @@ func main() {
 		}
 	}
 
-	re := regexp.MustCompile(`"ipv6":\s*"([^"]*)"`)
+	re := regexp.MustCompile(`"ipv6"\s*:\s*"([^"]*)"`)
 	match := re.FindStringSubmatch(string(data))
 	if len(match) < 2 {
 		log.Fatal("Error parsing cjdroute.conf file: IPv6 address not found")
