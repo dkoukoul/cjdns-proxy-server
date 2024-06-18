@@ -112,8 +112,13 @@ func commentOut(filename string) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 		// If the line contains "listen [::]:80", comment it out.
-		if strings.Contains(line, "listen [::]:80") && !strings.HasPrefix(line, "#") {
-			line = "#" + line + " # by cjdns-proxy-server"
+		if strings.Contains(line, "listen [::]:80") {
+			if !strings.HasPrefix(line, "#") {
+				line = "#" + line + " # by cjdns-proxy-server"
+			}
+			if !strings.Contains(lines[len(lines)-1], "listen 81;") {
+				lines = append(lines, "    listen 81; # by cjdns-proxy-server")
+			}
 		}
 		lines = append(lines, line)
 	}
